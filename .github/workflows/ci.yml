@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Download modules
+        run: go mod download
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race ./...
+      - name: Build
+        run: go build ./...
+      - name: Vulnerability scan
+        uses: golang/govulncheck-action@v1
+        with:
+          go-package: ./...
+
+  cross-build:
+    name: Cross build ${{ matrix.goos }}/${{ matrix.goarch }}${{ matrix.goarm }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64, goarm: "" }
+          - { goos: linux, goarch: arm64, goarm: "" }
+          - { goos: linux, goarch: arm, goarm: "7" }
+          - { goos: darwin, goarch: amd64, goarm: "" }
+          - { goos: darwin, goarch: arm64, goarm: "" }
+          - { goos: windows, goarch: amd64, goarm: "" }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        run: go build -trimpath -o /tmp/blackflame-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/blackflame
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+
+  container:
+    name: Container build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64
+          tags: blackflame:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

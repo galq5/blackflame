@@ -1,0 +1,93 @@
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: ghcr.io/galq/blackflame
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# ui: SQLite is authoritative and the browser can edit.
+# gitops: YAML is authoritative and the browser is read-only.
+mode: ui
+
+# YAML content for gitops mode. Ignored in ui mode.
+config: ""
+existingConfigMap: ""
+
+# Optional Kubernetes Secret with a "password" key. The same value can also be
+# provided through env or through the first-run setup screen in ui mode.
+existingSecret: ""
+
+env: []
+envFrom: []
+
+persistence:
+  enabled: true
+  accessMode: ReadWriteOnce
+  size: 1Gi
+  storageClass: ""
+  existingClaim: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+rbac:
+  create: true
+  discovery: true
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: blackflame.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources: {}
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+probes:
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 5
+    periodSeconds: 20
+  readiness:
+    path: /readyz
+    initialDelaySeconds: 3
+    periodSeconds: 10
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  additionalLabels: {}
+
+networkPolicy:
+  enabled: false

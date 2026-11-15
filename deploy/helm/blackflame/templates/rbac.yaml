@@ -1,0 +1,46 @@
+{{- if and .Values.rbac.create .Values.rbac.discovery -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "blackflame.fullname" . }}-discovery
+  labels:
+    {{- include "blackflame.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - ingresses
+    verbs:
+      - get
+      - list
+  - apiGroups:
+      - gateway.networking.k8s.io
+    resources:
+      - httproutes
+    verbs:
+      - get
+      - list
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+      - pods
+    verbs:
+      - get
+      - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "blackflame.fullname" . }}-discovery
+  labels:
+    {{- include "blackflame.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "blackflame.fullname" . }}-discovery
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "blackflame.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

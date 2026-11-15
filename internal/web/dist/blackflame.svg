@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Black Flame</title>
+  <desc id="desc">An asymmetric black flame with a transparent sweeping inner flame.</desc>
+  <path fill="#111114" fill-rule="evenodd" d="M144 16C151 63 105 82 101 119C84 110 79 92 81 77C56 101 40 132 40 163C40 208 77 240 125 240C176 240 216 205 216 159C216 127 198 98 174 79C180 109 171 127 154 139C163 91 185 61 144 16Z M128 216C102 216 84 200 84 177C84 151 106 131 125 114C116 144 131 157 147 166C160 153 166 139 167 125C193 170 179 216 128 216Z"/>
+</svg>

@@ -1,0 +1,25 @@
+Blackflame is installed.
+
+{{- if eq .Values.mode "ui" }}
+UI mode: content lives in SQLite. {{ if .Values.persistence.enabled }}Data is stored on the PVC.{{ else }}Persistence is disabled; content will be lost when the pod is replaced.{{ end }}
+{{- else }}
+GitOps mode: content is read-only and loaded from {{ include "blackflame.configMapName" . }}.
+{{- end }}
+
+{{- if .Values.ingress.enabled }}
+Open the dashboard at:
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else }}
+Forward the service locally:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "blackflame.fullname" . }} 8080:{{ .Values.service.port }}
+{{- end }}
+
+{{- if and (eq .Values.mode "ui") (not .Values.existingSecret) }}
+Set a password through the first-run setup screen, or provide one with:
+  --set existingSecret=<secret-name>
+{{- end }}
+
+If Kubernetes discovery is enabled, set discovery.kubernetes.enabled in the
+dashboard settings. The chart's read-only ClusterRole is already installed.

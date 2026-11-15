@@ -1,0 +1,16 @@
+{{- if eq .Values.mode "gitops" }}
+{{- if and (not .Values.existingConfigMap) (not .Values.config) }}
+{{- fail "mode=gitops requires either .Values.config or .Values.existingConfigMap" }}
+{{- end }}
+{{- if not .Values.existingConfigMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "blackflame.configMapName" . }}
+  labels:
+    {{- include "blackflame.labels" . | nindent 4 }}
+data:
+  blackflame.yaml: |
+    {{- .Values.config | nindent 4 }}
+{{- end }}
+{{- end }}

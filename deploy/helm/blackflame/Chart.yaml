@@ -1,0 +1,16 @@
+apiVersion: v2
+name: blackflame
+description: A Flame-compatible homelab dashboard with Kubernetes and Docker discovery.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/galq/blackflame
+icon: https://raw.githubusercontent.com/galq/blackflame/HEAD/assets/black-flame-128.png
+sources:
+  - https://github.com/galq/blackflame
+keywords:
+  - homelab
+  - dashboard
+  - startpage
+  - kubernetes
+  - docker

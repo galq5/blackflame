@@ -1,0 +1,117 @@
+version: 1
+
+branding:
+  name: Blackflame
+  description: Homelab dashboard
+
+theme:
+  preset: blackflame
+
+layout:
+  showHero: false
+  showSearch: true
+  showClock: true
+  showWeather: true
+
+search:
+  providers:
+    - name: Google
+      prefix: /g
+      url: https://www.google.com/search?q=%s
+    - name: YouTube
+      prefix: /yt
+      url: https://www.youtube.com/results?search_query=%s
+    - name: GitHub
+      prefix: /gh
+      url: https://github.com/search?q=%s
+    - name: Wikipedia
+      prefix: /w
+      url: https://en.wikipedia.org/w/index.php?search=%s
+
+weather:
+  enabled: true
+  latitude: 51.5072
+  longitude: -0.1276
+  units: metric
+  location: London
+
+status:
+  enabled: true
+  intervalSeconds: 60
+  timeoutSeconds: 5
+  expectedStatus: 200-399
+  maxConcurrency: 16
+
+discovery:
+  docker:
+    enabled: true
+    socket: /var/run/docker.sock
+    intervalSeconds: 30
+  kubernetes:
+    enabled: true
+    intervalSeconds: 30
+    namespaces: []
+    labelSelector: ""
+    ingressClass: traefik
+
+boards:
+  - slug: home
+    name: Home
+    public: true
+    sections:
+      - name: Media
+        public: true
+        items:
+          - kind: app
+            name: Immich
+            url: https://photos.example.com
+            icon: immich
+            description: Photo and video library
+            pinned: true
+          - kind: app
+            name: Jellyfin
+            url: https://jellyfin.example.com
+            icon: jellyfin
+            description: Movies and TV
+          - kind: app
+            name: Navidrome
+            url: https://music.example.com
+            icon: navidrome
+            description: Music streaming
+      - name: Infrastructure
+        public: true
+        items:
+          - kind: app
+            name: Proxmox
+            url: https://proxmox.example.com
+            icon: proxmox
+            description: Virtualization
+          - kind: app
+            name: Pi-hole
+            url: https://pihole.example.com/admin
+            icon: pi-hole
+            description: DNS and ad blocking
+          - kind: app
+            name: Traefik
+            url: https://traefik.example.com
+            icon: traefik
+            description: Ingress and certificates
+      - name: Bookmarks
+        public: true
+        items:
+          - kind: bookmark
+            name: Homelab docs
+            url: https://example.com/docs
+            icon: bookstack
+            public: true
+  - slug: family
+    name: Family
+    public: true
+    sections:
+      - name: Shared
+        public: true
+        items:
+          - kind: app
+            name: Photos
+            url: https://photos.example.com
+            icon: immich
