@@ -1,12 +1,12 @@
 :root {
-  --bf-bg: #141211;
-  --bf-surface: #201c1a;
-  --bf-surface2: #2a2420;
-  --bf-text: #f5eee7;
-  --bf-muted: #b9aaa0;
-  --bf-accent: #ff8b63;
-  --bf-accent2: #ffc487;
-  --bf-border: #3b322d;
+  --bf-bg: #101214;
+  --bf-surface: #181b1e;
+  --bf-surface2: #22262a;
+  --bf-text: #eef0f2;
+  --bf-muted: #9ba2aa;
+  --bf-accent: #efb66c;
+  --bf-accent2: #f4d29f;
+  --bf-border: #30353a;
   --bf-radius: 16px;
   --bf-font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --bf-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
@@ -1098,4 +1098,77 @@ button:disabled {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+
+/* Compact, full-width dashboard */
+body { background: var(--bf-bg); }
+.brand-mark { background: var(--bf-accent); border-radius: 8px; width: 28px; height: 28px; }
+.brand-logo { width: 21px; height: 21px; }
+.brand { font-size: .95rem; gap: 8px; }
+.brand small { display: none; }
+.topbar-inner { width: 100%; padding: 9px clamp(24px, 4vw, 64px); gap: 12px; }
+.search { margin-right: auto; }
+.search-box { background: var(--bf-surface); border-radius: 8px; padding: 7px 11px; }
+.search-box input { font-size: .85rem; }
+.board-switcher { padding: 6px 10px; border-radius: 8px; font-size: .8rem; }
+.app-shell { width: 100%; max-width: none; padding: 20px clamp(24px, 4vw, 64px) 24px; }
+.hero { padding: 0 0 12px; margin: 0 0 14px; border: 0; border-bottom: 1px solid var(--bf-border); border-radius: 0; background: none; align-items: center; }
+.hero h1 { font-size: 1.4rem; letter-spacing: -.035em; }
+.hero p { font-size: .75rem; margin-top: 4px; }
+.hero-side { gap: 16px; text-align: right; }
+.clock-card, .weather-card { padding: 0; border: 0; background: none; box-shadow: none; min-width: 0; }
+.clock-card .time, .weather-temp { font-size: 1.1rem; }
+.clock-card .date { font-size: .68rem; }
+.board { display: grid; grid-template-columns: 1fr; gap: 16px; }
+.section { min-width: 0; gap: 7px; }
+.section-head { gap: 10px; }
+.section-head h2 { font-size: .78rem; font-weight: 650; }
+.section-actions { margin-left: auto; }
+.tile-grid, .pinned-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, min(100%, var(--bf-tileSize)));
+  justify-content: start;
+  gap: 6px;
+}
+.pinned-row { padding: 0; overflow: visible; }
+.tile, .pinned-row .tile { min-width: 0; max-width: none; min-height: 0; border: 1px solid var(--bf-border); border-radius: 8px; background: var(--bf-surface); box-shadow: none; }
+.tile::before { display: none; }
+.tile:hover { transform: none; box-shadow: none; background: var(--bf-surface2); border-color: var(--bf-accent); }
+.tile-link, .pinned-row .tile-link { flex-direction: row; align-items: center; padding: 9px; gap: 9px; min-height: 68px; }
+.tile-icon-wrap { width: 30px; height: 30px; border-radius: 7px; background: var(--bf-surface2); }
+.tile-icon { width: 22px; height: 22px; }
+.tile-fallback { font-size: .85rem; }
+.tile-body { flex: 1; width: auto; }
+.tile-name { font-size: .8rem; font-weight: 600; }
+.tile-desc { font-size: .67rem; margin-top: 2px; -webkit-line-clamp: 1; }
+.tile-meta { font-size: .61rem; margin-top: 4px; gap: 5px; }
+.status-dot { width: 5px; height: 5px; box-shadow: none; }
+.tile-launch { display: none; }
+.tile-edit { gap: 3px; padding: 4px; }
+.tile-edit .btn { min-height: 28px; }
+.footer { margin-top: 20px; padding-top: 10px; font-size: .65rem; }
+.btn { border-radius: 7px; font-weight: 550; min-height: 34px; padding: 6px 11px; }
+.btn:hover { transform: none; }
+.widget-grid { gap: 8px; margin-bottom: 16px; }
+.widget-card { min-height: 0; padding: 12px; box-shadow: none; background: var(--bf-surface); border-radius: 8px; }
+.widget-head { margin-bottom: 6px; }
+.widget-main { font-size: 1.3rem; }
+.modal { border-radius: 16px; }
+.modal form { display: flex; flex-direction: column; min-height: 0; }
+.edit-banner { margin-top: 0; padding: 8px 10px; }
+@media (max-width: 900px) {
+  .topbar-inner { flex-wrap: wrap; gap: 8px; }
+  .search { order: 5; flex-basis: 100%; }
+  .hero { flex-direction: row; align-items: center; gap: 12px; }
+  .hero-side { width: auto; }
+}
+@media (max-width: 560px) {
+  .app-shell { padding: 16px 16px 20px; }
+  .topbar-inner { padding: 8px 16px; }
+  .tile-grid, .pinned-row { grid-template-columns: repeat(auto-fit, min(100%, var(--bf-tileSize), 140px)); }
+  .tile-link, .pinned-row .tile-link { padding: 8px; gap: 7px; }
+  .hero-side { flex-wrap: wrap; }
+  .section-head { flex-wrap: wrap; }
+  .top-status { margin-left: auto; }
 }

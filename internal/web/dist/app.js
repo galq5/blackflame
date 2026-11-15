@@ -5,8 +5,8 @@ const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selec
 
 const PRESETS = {
   blackflame: {
-    bg: '#141211', surface: '#201c1a', surface2: '#2a2420', text: '#f5eee7',
-    muted: '#b9aaa0', accent: '#ff8b63', accent2: '#ffc487', border: '#3b322d',
+    bg: '#101214', surface: '#181b1e', surface2: '#22262a', text: '#eef0f2',
+    muted: '#9ba2aa', accent: '#efb66c', accent2: '#f4d29f', border: '#30353a',
     radius: '16px', shadow: '0 18px 60px rgba(0, 0, 0, 0.35)', tileSize: '168px',
     font: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   },
@@ -415,7 +415,7 @@ function renderBoard(board) {
   }
   return `
     <main class="board">
-      ${pinned.length ? `<section class="section" aria-labelledby="pinned-heading"><div class="section-head"><h2 id="pinned-heading">Pinned</h2><span class="line"></span></div><div class="pinned-row">${pinned.map(({ item, section }) => renderTile(item, section, board)).join('')}</div></section>` : ''}
+      ${pinned.length ? `<section class="section pinned-section" aria-labelledby="pinned-heading"><div class="section-head"><h2 id="pinned-heading">Pinned</h2><span class="line"></span></div><div class="pinned-row">${pinned.map(({ item, section }) => renderTile(item, section, board)).join('')}</div></section>` : ''}
       ${(board.sections || []).map((section) => renderSection(section, board)).join('')}
       ${state.editing ? `<button class="btn ghost" data-action="add-section">+ Add section</button>` : ''}
     </main>
@@ -467,6 +467,7 @@ function renderTile(item, section, board) {
             ${item.public === false ? '<span>· private</span>' : ''}
           </div>
         </div>
+        <span class="tile-launch" aria-hidden="true">↗</span>
       </a>
       ${showEdit ? `
         <div class="tile-edit">
