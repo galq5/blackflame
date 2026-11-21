@@ -267,6 +267,7 @@ function render() {
     ${renderTopbar()}
     <div class="app-shell">
       ${layoutSettings().showHero ? renderHero(board) : ''}
+      ${layoutSettings().showSearch ? renderSearch() : ''}
       ${renderWidgets()}
       ${state.editing ? renderEditBanner(board) : ''}
       ${state.configError ? `<div class="edit-banner"><span><strong>Config error:</strong> ${esc(state.configError)} — serving the last good configuration.</span></div>` : ''}
@@ -279,6 +280,19 @@ function render() {
   if (state.search) {
     renderSearchResults();
   }
+}
+
+function renderSearch() {
+  return `
+    <div class="search">
+      <div class="search-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+        <input data-search-input type="search" autocomplete="off" spellcheck="false" placeholder="Search apps and bookmarks…" value="${esc(state.search)}" aria-label="Search">
+        <kbd>/</kbd>
+      </div>
+      <div class="search-results hidden" data-search-results></div>
+    </div>
+  `;
 }
 
 function renderTopbar() {
@@ -300,16 +314,6 @@ function renderTopbar() {
             ${boards.map((entry) => `<option value="${esc(entry.slug)}" ${entry.slug === board?.slug ? 'selected' : ''}>${esc(entry.name)}</option>`).join('')}
           </select>
         ` : ''}
-        ${layout.showSearch ? `
-          <div class="search">
-            <div class="search-box">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
-              <input data-search-input type="search" autocomplete="off" spellcheck="false" placeholder="Search apps and bookmarks…" value="${esc(state.search)}" aria-label="Search">
-              <kbd>/</kbd>
-            </div>
-            <div class="search-results hidden" data-search-results></div>
-          </div>
-        ` : '<span class="topbar-spacer"></span>'}
         ${!layout.showHero ? renderTopbarStatus(layout) : ''}
         <div class="top-actions">
           ${auth.authenticated ? `
@@ -415,7 +419,7 @@ function renderBoard(board) {
   }
   return `
     <main class="board">
-      ${pinned.length ? `<section class="section pinned-section" aria-labelledby="pinned-heading"><div class="section-head"><h2 id="pinned-heading">Pinned</h2><span class="line"></span></div><div class="pinned-row">${pinned.map(({ item, section }) => renderTile(item, section, board)).join('')}</div></section>` : ''}
+      ${pinned.length ? `<section class="section pinned-section" aria-labelledby="pinned-heading"><div class="section-head"><h2 id="pinned-heading">Pinned</h2><span class="section-count">${pinned.length}</span><span class="line"></span></div><div class="pinned-row">${pinned.map(({ item, section }) => renderTile(item, section, board)).join('')}</div></section>` : ''}
       ${(board.sections || []).map((section) => renderSection(section, board)).join('')}
       ${state.editing ? `<button class="btn ghost" data-action="add-section">+ Add section</button>` : ''}
     </main>
@@ -428,6 +432,7 @@ function renderSection(section, board) {
     <section class="section" data-section-id="${section.id || ''}">
       <div class="section-head">
         <h2>${esc(section.name)}${section.pinned ? ' · pinned' : ''}${section.public === false ? ' · private' : ''}</h2>
+        <span class="section-count">${items.length}</span>
         <span class="line"></span>
         ${state.editing ? `
           <div class="section-actions">
