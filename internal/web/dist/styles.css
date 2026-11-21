@@ -1140,11 +1140,10 @@ body {
 .pinned-section .section-head { color: var(--bf-accent); margin-bottom: 11px; }
 .pinned-row { grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--bf-tileSize) + 50px)), 1fr)); padding: 0; overflow: visible; }
 .pinned-row .tile {
-  background: repeating-radial-gradient(ellipse 210px 290px at 103% 140%, transparent 0 12px, color-mix(in srgb, var(--bf-accent) 15%, transparent) 13px, transparent 14px 23px),
-              linear-gradient(104deg, var(--bf-surface) 30%, color-mix(in srgb, var(--bf-accent) 16%, var(--bf-surface)));
-  background-size: 40% 100%, 100% 100%;
-  background-position: right;
-  background-repeat: no-repeat;
+  background:
+    url("embers.svg") right bottom / auto min(100%, 116px) no-repeat,
+    radial-gradient(ellipse at bottom right, color-mix(in srgb, #db702e 23%, transparent), transparent 68%),
+    var(--bf-surface);
 }
 .pinned-row .tile-link { padding: 20px; min-height: 100px; }
 .pinned-row .tile-name { font-size: 1.18rem; }
