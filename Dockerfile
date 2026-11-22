@@ -21,7 +21,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH GOARM=${TARGETVARIANT#v} \
       -X github.com/galq/blackflame/internal/version.BuildDate=$BUILD_DATE" \
     -o /out/blackflame ./cmd/blackflame
 
-FROM alpine:3.24.3
+FROM alpine:3.24.4
 
 RUN addgroup -S -g 1000 blackflame \
     && adduser -S -D -H -u 1000 -G blackflame -h /data blackflame \
