@@ -124,4 +124,12 @@ func TestParseStatusRange(t *testing.T) {
 	if err != nil || start != 200 || end != 399 {
 		t.Fatalf("unexpected range: %d %d %v", start, end, err)
 	}
+	if _, _, err := ParseStatusRange("399-200"); err == nil {
+		t.Fatal("expected an inverted range to be rejected")
+	}
+	cfg := Default()
+	cfg.Status.ExpectedStatus = "399-200"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected validation to reject an inverted status range")
+	}
 }

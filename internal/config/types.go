@@ -61,7 +61,9 @@ type Theme struct {
 }
 
 type Search struct {
-	Providers []SearchProvider `yaml:"providers,omitempty" json:"providers"`
+	// No omitempty: an explicitly emptied provider list must survive an
+	// export → import round trip instead of resurrecting the defaults.
+	Providers []SearchProvider `yaml:"providers" json:"providers"`
 }
 
 type SearchProvider struct {

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -45,16 +46,15 @@ func UpsertDiscovered(ctx context.Context, db *sql.DB, source string, items []co
 			WHERE source = ? AND external_id = ?`, source, item.ExternalID).Scan(&existingID, &overridden)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			var order int
-			_ = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sort_order), -1) + 1 FROM items WHERE section_id = ?`, sectionID).Scan(&order)
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO items(
 					board_id, section_id, kind, name, url, icon, description,
 					is_public, is_pinned, is_hidden, check_enabled, source,
 					external_id, group_name, is_override, sort_order
-				) VALUES (?, ?, 'app', ?, ?, ?, '', 1, 0, ?, 1, ?, ?, ?, 0, ?)`,
+				) VALUES (?, ?, 'app', ?, ?, ?, '', 1, 0, ?, 1, ?, ?, ?, 0,
+					COALESCE((SELECT MAX(sort_order) FROM items WHERE section_id = ?), -1) + 1)`,
 				boardID, sectionID, item.Name, item.URL, item.Icon, boolInt(item.Hidden),
-				source, item.ExternalID, group, order,
+				source, item.ExternalID, group, sectionID,
 			); err != nil {
 				return fmt.Errorf("insert discovered item %s: %w", item.ExternalID, err)
 			}
@@ -66,13 +66,21 @@ func UpsertDiscovered(ctx context.Context, db *sql.DB, source string, items []co
 				return fmt.Errorf("refresh discovered item group: %w", err)
 			}
 		default:
+			// Moving an item into a different section must also move it to
+			// the end of that section; keeping the old sort_order collides
+			// with the target section's ordering.
 			if _, err := tx.ExecContext(ctx, `
 				UPDATE items SET
 					board_id = ?, section_id = ?, name = ?, url = ?, icon = ?,
 					is_hidden = ?, group_name = ?,
+					sort_order = CASE
+						WHEN section_id = ? THEN items.sort_order
+						ELSE COALESCE((SELECT MAX(sort_order) FROM items WHERE section_id = ?), -1) + 1
+					END,
 					updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 				WHERE id = ?`,
-				boardID, sectionID, item.Name, item.URL, item.Icon, boolInt(item.Hidden), group, existingID,
+				boardID, sectionID, item.Name, item.URL, item.Icon, boolInt(item.Hidden), group,
+				sectionID, sectionID, existingID,
 			); err != nil {
 				return fmt.Errorf("update discovered item %s: %w", item.ExternalID, err)
 			}
@@ -114,11 +122,10 @@ func ensureSection(ctx context.Context, tx *sql.Tx, boardID int64, name string) 
 	if !errors.Is(err, sql.ErrNoRows) {
 		return 0, fmt.Errorf("find section %s: %w", name, err)
 	}
-	var order int
-	_ = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sort_order), -1) + 1 FROM sections WHERE board_id = ?`, boardID).Scan(&order)
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO sections(board_id, name, is_public, sort_order)
-		VALUES (?, ?, 1, ?)`, boardID, name, order)
+		VALUES (?, ?, 1, COALESCE((SELECT MAX(sort_order) FROM sections WHERE board_id = ?), -1) + 1)`,
+		boardID, name, boardID)
 	if err != nil {
 		return 0, fmt.Errorf("create section %s: %w", name, err)
 	}
@@ -199,6 +206,11 @@ func LoadDiscoveredItems(ctx context.Context, db *sql.DB) ([]config.Item, error)
 			Group:        group,
 			Override:     isOverride == 1,
 			SortOrder:    sortOrder,
+		}
+		if configJSON.Valid && configJSON.String != "" {
+			if err := json.Unmarshal([]byte(configJSON.String), &item.Config); err != nil {
+				return nil, fmt.Errorf("decode discovered item config: %w", err)
+			}
 		}
 		items = append(items, item)
 	}

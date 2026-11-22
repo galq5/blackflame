@@ -16,11 +16,33 @@ import (
 )
 
 func TestBlockedTarget(t *testing.T) {
-	if !blockedTarget("http://169.254.169.254/latest/meta-data") {
-		t.Fatal("cloud metadata endpoint was not blocked")
+	blocked := []string{
+		"http://169.254.169.254/latest/meta-data",
+		// IPv4-mapped IPv6 spellings of the same address.
+		"http://[::ffff:169.254.169.254]/latest",
+		"http://[::ffff:a9fe:a9fe]/latest",
+		// Other link-local addresses in the same range.
+		"http://169.254.100.100/latest",
+		// Known metadata endpoints by name or address.
+		"http://metadata.google.internal/computeMetadata/v1",
+		"http://metadata/",
+		"http://[fd00:ec2::254]/latest",
+		"http://100.100.100.200/latest/meta-data",
 	}
-	if blockedTarget("https://example.com") {
-		t.Fatal("normal target was blocked")
+	for _, target := range blocked {
+		if !blockedTarget(target) {
+			t.Fatalf("expected %q to be blocked", target)
+		}
+	}
+	allowed := []string{
+		"https://example.com",
+		"http://192.168.1.10:8080/healthz",
+		"http://[fd12::5]:9090/status",
+	}
+	for _, target := range allowed {
+		if blockedTarget(target) {
+			t.Fatalf("expected %q to be allowed", target)
+		}
 	}
 }
 

@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/galq/blackflame/internal/config"
@@ -203,5 +205,156 @@ func TestMergeDiscoveredDoesNotMutateBase(t *testing.T) {
 	}
 	if len(merged.Boards) != 2 {
 		t.Fatalf("expected synthetic discovered board, got %+v", merged.Boards)
+	}
+}
+
+func TestDeleteBoardGuards(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	var homeID int64
+	if err := db.QueryRowContext(ctx, `SELECT id FROM boards WHERE slug = 'home'`).Scan(&homeID); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteBoard(ctx, db, homeID); !errors.Is(err, ErrLastBoard) {
+		t.Fatalf("expected ErrLastBoard, got %v", err)
+	}
+	if err := DeleteBoard(ctx, db, 9999); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+
+	second, err := CreateBoard(ctx, db, "work", "Work", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteBoard(ctx, db, second); err != nil {
+		t.Fatalf("delete with two boards: %v", err)
+	}
+	if err := DeleteBoard(ctx, db, homeID); !errors.Is(err, ErrLastBoard) {
+		t.Fatalf("expected ErrLastBoard for survivor, got %v", err)
+	}
+}
+
+func TestConcurrentDeleteBoardsKeepsOne(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	var homeID int64
+	if err := db.QueryRowContext(ctx, `SELECT id FROM boards WHERE slug = 'home'`).Scan(&homeID); err != nil {
+		t.Fatal(err)
+	}
+	second, err := CreateBoard(ctx, db, "work", "Work", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	results := make([]error, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for index, id := range []int64{homeID, second} {
+		go func(index int, id int64) {
+			defer wg.Done()
+			results[index] = DeleteBoard(ctx, db, id)
+		}(index, id)
+	}
+	wg.Wait()
+
+	succeeded := 0
+	for _, err := range results {
+		if err == nil {
+			succeeded++
+		}
+	}
+	if succeeded != 1 {
+		t.Fatalf("expected exactly one successful delete, got %d (%v)", succeeded, results)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM boards`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one surviving board, got %d", count)
+	}
+}
+
+func TestItemRequiresMatchingBoard(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	boardA, err := CreateBoard(ctx, db, "board-a", "A", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	boardB, err := CreateBoard(ctx, db, "board-b", "B", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sectionA, err := CreateSection(ctx, db, boardA, "Apps", true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := ItemInput{BoardID: boardB, SectionID: sectionA, Kind: "app", Name: "Mismatched", URL: "https://m.example", Public: true}
+	if _, err := CreateItem(ctx, db, input); err == nil {
+		t.Fatal("accepted an item whose section belongs to another board")
+	}
+	valid := ItemInput{BoardID: boardA, SectionID: sectionA, Kind: "app", Name: "Matched", URL: "https://ok.example", Public: true}
+	itemID, err := CreateItem(ctx, db, valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mismatched := valid
+	mismatched.BoardID = boardB
+	if err := UpdateItem(ctx, db, itemID, mismatched); err == nil {
+		t.Fatal("update accepted a section from another board")
+	}
+}
+
+func TestLoadDiscoveredItemsKeepsItemConfig(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if err := UpsertDiscovered(ctx, db, config.SourceDocker, []config.DiscoveredItem{{
+		Source:     config.SourceDocker,
+		ExternalID: "cfg:1",
+		Name:       "Configured",
+		URL:        "https://cfg.example",
+		Icon:       "docker",
+		Group:      "Docker",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	var boardID, sectionID, itemID int64
+	if err := db.QueryRowContext(ctx, `SELECT board_id, section_id, id FROM items WHERE external_id = 'cfg:1'`).Scan(&boardID, &sectionID, &itemID); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateItem(ctx, db, itemID, ItemInput{
+		BoardID: boardID, SectionID: sectionID, Kind: "app", Name: "Configured",
+		URL: "https://cfg.example", Public: true, CheckEnabled: true,
+		Config: map[string]any{"port": 8080},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := LoadDiscoveredItems(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, item := range items {
+		if item.ExternalID != "cfg:1" {
+			continue
+		}
+		found = true
+		if item.Config == nil {
+			t.Fatal("LoadDiscoveredItems dropped the per-item config")
+		}
+	}
+	if !found {
+		t.Fatal("discovered item missing from LoadDiscoveredItems")
 	}
 }

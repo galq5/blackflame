@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -55,7 +56,7 @@ func discoverDocker(ctx context.Context, socket string) ([]config.DiscoveredItem
 		return nil, fmt.Errorf("docker API returned %d", resp.StatusCode)
 	}
 	var containers []dockerContainer
-	if err := json.NewDecoder(resp.Body).Decode(&containers); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&containers); err != nil {
 		return nil, fmt.Errorf("decode docker containers: %w", err)
 	}
 

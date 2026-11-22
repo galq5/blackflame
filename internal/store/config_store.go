@@ -76,9 +76,35 @@ func (s *SQLiteStore) signal() {
 	}
 }
 
+// querier is satisfied by both *sql.DB and *sql.Tx so config loads can run
+// inside a single read transaction.
+type querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// LoadConfig assembles the full snapshot inside one read transaction so
+// concurrent CRUD writes cannot interleave between the board, section, and
+// item queries and produce a torn snapshot.
 func LoadConfig(ctx context.Context, db *sql.DB) (*config.Config, error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin config load: %w", err)
+	}
+	defer tx.Rollback()
+	cfg, err := loadConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit config load: %w", err)
+	}
+	return cfg, nil
+}
+
+func loadConfig(ctx context.Context, q querier) (*config.Config, error) {
 	cfg := config.Default()
-	if err := loadSettings(ctx, db, cfg); err != nil {
+	if err := loadSettings(ctx, q, cfg); err != nil {
 		return nil, err
 	}
 
@@ -117,7 +143,7 @@ func LoadConfig(ctx context.Context, db *sql.DB) (*config.Config, error) {
 		sortOrder    int
 	}
 
-	boardRows, err := queryRows(ctx, db, `
+	boardRows, err := queryRows(ctx, q, `
 		SELECT id, slug, name, is_public, theme_json
 		FROM boards
 		ORDER BY sort_order, id`, func(rows *sql.Rows) (boardRow, error) {
@@ -129,7 +155,7 @@ func LoadConfig(ctx context.Context, db *sql.DB) (*config.Config, error) {
 		return nil, fmt.Errorf("query boards: %w", err)
 	}
 
-	sectionRows, err := queryRows(ctx, db, `
+	sectionRows, err := queryRows(ctx, q, `
 		SELECT id, board_id, name, is_public, is_pinned, sort_order
 		FROM sections
 		ORDER BY board_id, sort_order, id`, func(rows *sql.Rows) (sectionRow, error) {
@@ -141,7 +167,7 @@ func LoadConfig(ctx context.Context, db *sql.DB) (*config.Config, error) {
 		return nil, fmt.Errorf("query sections: %w", err)
 	}
 
-	itemRows, err := queryRows(ctx, db, `
+	itemRows, err := queryRows(ctx, q, `
 		SELECT section_id, id, kind, name, url, icon, description, is_public, is_pinned,
 		       is_hidden, check_enabled, source, external_id, group_name,
 		       is_override, config_json, sort_order
@@ -227,8 +253,8 @@ func LoadConfig(ctx context.Context, db *sql.DB) (*config.Config, error) {
 	return cfg, nil
 }
 
-func queryRows[T any](ctx context.Context, db *sql.DB, query string, scan func(*sql.Rows) (T, error)) ([]T, error) {
-	rows, err := db.QueryContext(ctx, query)
+func queryRows[T any](ctx context.Context, q querier, query string, scan func(*sql.Rows) (T, error)) ([]T, error) {
+	rows, err := q.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +273,7 @@ func queryRows[T any](ctx context.Context, db *sql.DB, query string, scan func(*
 	return values, nil
 }
 
-func loadSettings(ctx context.Context, db *sql.DB, cfg *config.Config) error {
+func loadSettings(ctx context.Context, q querier, cfg *config.Config) error {
 	settings := []struct {
 		key    string
 		target any
@@ -264,7 +290,7 @@ func loadSettings(ctx context.Context, db *sql.DB, cfg *config.Config) error {
 	}
 	for _, setting := range settings {
 		var raw string
-		err := db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, setting.key).Scan(&raw)
+		err := q.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, setting.key).Scan(&raw)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
@@ -278,7 +304,14 @@ func loadSettings(ctx context.Context, db *sql.DB, cfg *config.Config) error {
 	return nil
 }
 
+// SaveSettings persists all settings in one transaction so a failure partway
+// cannot leave half-new values behind.
 func SaveSettings(ctx context.Context, db *sql.DB, cfg *config.Config) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin settings save: %w", err)
+	}
+	defer tx.Rollback()
 	settings := []struct {
 		key   string
 		value any
@@ -298,11 +331,14 @@ func SaveSettings(ctx context.Context, db *sql.DB, cfg *config.Config) error {
 		if err != nil {
 			return fmt.Errorf("marshal setting %s: %w", setting.key, err)
 		}
-		if _, err := db.ExecContext(ctx, `
+		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO settings(key, value) VALUES (?, ?)
 			ON CONFLICT(key) DO UPDATE SET value = excluded.value`, setting.key, string(raw)); err != nil {
 			return fmt.Errorf("save setting %s: %w", setting.key, err)
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit settings save: %w", err)
 	}
 	return nil
 }

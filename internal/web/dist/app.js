@@ -81,6 +81,23 @@ function safeURL(value) {
   }
 }
 
+function safeDecode(value) {
+  try { return decodeURIComponent(value); } catch { return value; }
+}
+
+function numberValue(element, fallback) {
+  const parsed = Number(element?.value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function hashString(value) {
+  let hash = 5381;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) + hash + value.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(36);
+}
+
 function initial(name) {
   const text = String(name || '?').trim();
   return text ? text.slice(0, 1).toUpperCase() : '?';
@@ -218,7 +235,7 @@ function chooseBoard() {
   if (path.startsWith(base)) {
     const rest = path.slice(base.length);
     const match = rest.match(/^b\/([^/]+)/);
-    if (match) slug = decodeURIComponent(match[1]);
+    if (match) slug = safeDecode(match[1]);
   }
   state.board = boards.find((board) => board.slug === slug) || boards[0] || null;
 }
@@ -227,6 +244,9 @@ function navigateBoard(slug) {
   const board = state.config?.boards?.find((entry) => entry.slug === slug);
   if (!board) return;
   state.board = board;
+  // Search results were resolved against the previous board; recompute them
+  // so clicking a result never opens the old board's item.
+  computeSearch(state.search || '');
   history.pushState({}, '', `${BASE}b/${encodeURIComponent(slug)}`);
   document.title = `${board.name} · ${branding().name}`;
   applyTheme();
@@ -251,7 +271,11 @@ function applyTheme() {
   root.style.colorScheme = presetName === 'light' ? 'light' : 'dark';
   const custom = $('#custom-css');
   if (custom) {
-    custom.href = `${BASE}custom.css?v=${Date.now()}`;
+    // Cache-bust on content changes instead of on every load so board
+    // switches and saves do not re-download the stylesheet.
+    const signature = hashString(`${presetName}|${theme.customCss || ''}|${JSON.stringify(theme.variables || {})}`);
+    const url = `${BASE}custom.css?v=${signature}`;
+    if (custom.getAttribute('href') !== url) custom.setAttribute('href', url);
   }
 }
 
@@ -894,10 +918,14 @@ function renderSettingsModal() {
   $('#modal-root .modal')?.classList.add('settings-modal');
   const navigation = $('.settings-nav');
   const activeTab = $('.settings-nav .active');
-  if (navigation && activeTab && navigation.scrollWidth > navigation.clientWidth) {
-    navigation.scrollLeft = activeTab.offsetLeft - navigation.offsetLeft - 12;
+  if (navigation && activeTab) {
+    if (navigation.scrollWidth > navigation.clientWidth) {
+      navigation.scrollLeft = activeTab.offsetLeft - navigation.offsetLeft - 12;
+    }
+    if (navigation.scrollHeight > navigation.clientHeight) {
+      activeTab.scrollIntoView({ block: 'nearest' });
+    }
   }
-
 }
 
 function renderSettingsBody() {
@@ -941,9 +969,12 @@ function renderLayoutSettings(layout) {
 function renderThemeSettings(theme) {
   const variables = { ...(PRESETS[theme.preset] || PRESETS.blackflame), ...(theme.variables || {}) };
   const fields = { bg: 'Background', surface: 'Surface', surface2: 'Secondary surface', text: 'Text', muted: 'Muted text', accent: 'Accent', accent2: 'Secondary accent', border: 'Border' };
+  // Keep an unknown preset selectable so saving does not silently coerce it.
+  const presetOptions = [...Object.keys(PRESETS)];
+  if (theme.preset && !PRESETS[theme.preset]) presetOptions.push(theme.preset);
   return `
     <div class="form-grid">
-      <div class="field"><label>Preset</label><select data-theme-preset>${Object.keys(PRESETS).map((name) => `<option value="${name}" ${theme.preset === name ? 'selected' : ''}>${name}</option>`).join('')}</select></div>
+      <div class="field"><label>Preset</label><select data-theme-preset>${presetOptions.map((name) => `<option value="${name}" ${theme.preset === name ? 'selected' : ''}>${name}</option>`).join('')}</select></div>
       <div class="field"><label>Radius</label><input data-theme-text="radius" value="${esc(variables.radius || '18px')}"></div>
       ${Object.entries(fields).map(([key, label]) => `<div class="field"><label>${label}</label><div class="color-row"><input type="text" data-theme-text="${key}" value="${esc(variables[key] || '')}"><input type="color" data-theme-var="${key}" value="${esc(variables[key] || '#000000')}"></div></div>`).join('')}
       <div class="field full"><label>Custom CSS</label><textarea data-custom-css placeholder="/* Extra CSS served from /custom.css */">${esc(theme.customCss || '')}</textarea><div class="hint">Custom CSS is served as a separate stylesheet. Only administrators can edit it.</div></div>
@@ -1182,6 +1213,9 @@ async function uploadIcon(file) {
   const form = new FormData();
   form.append('icon', file);
   const response = await api('api/v1/icons', { method: 'POST', body: form });
+  if (state.iconList && !state.iconList.includes(response.name)) {
+    state.iconList.push(response.name);
+  }
   setIconTarget(response.name);
   toast('Icon uploaded', 'success');
 }
@@ -1191,7 +1225,7 @@ function collectWidgetBase(prefix) {
     enabled: $(`[data-widget-${prefix}-enabled]`)?.checked || false,
     public: $(`[data-widget-${prefix}-public]`)?.checked || false,
     title: $(`[data-widget-${prefix}-title]`)?.value.trim() || '',
-    refreshSeconds: Number($(`[data-widget-${prefix}-refresh]`)?.value || 60),
+    refreshSeconds: numberValue($(`[data-widget-${prefix}-refresh]`), 60),
     insecureSkipVerify: $(`[data-widget-${prefix}-insecure]`)?.checked || false,
   };
 }
@@ -1243,8 +1277,8 @@ function collectIntegrationsSettings() {
     calendar: {
       ...collectWidgetBase('calendar'),
       url: $('[data-calendar-url]')?.value.trim() || '',
-      days: Number($('[data-calendar-days]')?.value || 7),
-      maxEvents: Number($('[data-calendar-max]')?.value || 5),
+      days: numberValue($('[data-calendar-days]'), 7),
+      maxEvents: numberValue($('[data-calendar-max]'), 5),
     },
   };
 }
@@ -1269,10 +1303,12 @@ function collectLayoutSettings() {
 function collectThemeSettings() {
   const variables = {};
   for (const input of $$('[data-theme-var]')) {
-    variables[input.dataset.themeVar] = input.value;
+    // Empty values mean "fall back to the preset"; saving "" would strip
+    // the variable and snap the UI to a different theme.
+    if (input.value.trim()) variables[input.dataset.themeVar] = input.value.trim();
   }
   for (const input of $$('[data-theme-text]')) {
-    variables[input.dataset.themeText] = input.value;
+    if (input.value.trim()) variables[input.dataset.themeText] = input.value.trim();
   }
   return {
     preset: $('[data-theme-preset]')?.value || 'blackflame',
@@ -1293,9 +1329,9 @@ function collectSearchSettings() {
 function collectStatusSettings() {
   return {
     enabled: $('[data-status-enabled]')?.checked ?? true,
-    intervalSeconds: Number($('[data-status-interval]')?.value || 60),
-    timeoutSeconds: Number($('[data-status-timeout]')?.value || 5),
-    maxConcurrency: Number($('[data-status-concurrency]')?.value || 16),
+    intervalSeconds: numberValue($('[data-status-interval]'), 60),
+    timeoutSeconds: numberValue($('[data-status-timeout]'), 5),
+    maxConcurrency: numberValue($('[data-status-concurrency]'), 16),
     expectedStatus: $('[data-status-expected]')?.value.trim() || '200-399',
   };
 }
@@ -1304,8 +1340,8 @@ function collectWeatherSettings() {
   return {
     enabled: $('[data-weather-enabled]')?.checked || false,
     location: $('[data-weather-location]')?.value.trim() || '',
-    latitude: Number($('[data-weather-lat]')?.value || 0),
-    longitude: Number($('[data-weather-lon]')?.value || 0),
+    latitude: numberValue($('[data-weather-lat]'), 0),
+    longitude: numberValue($('[data-weather-lon]'), 0),
     units: $('[data-weather-units]')?.value || 'metric',
   };
 }
@@ -1315,11 +1351,11 @@ function collectDiscoverySettings() {
     docker: {
       enabled: $('[data-docker-enabled]')?.checked || false,
       socket: $('[data-docker-socket]')?.value.trim() || '/var/run/docker.sock',
-      intervalSeconds: Number($('[data-docker-interval]')?.value || 30),
+      intervalSeconds: numberValue($('[data-docker-interval]'), 30),
     },
     kubernetes: {
       enabled: $('[data-k8s-enabled]')?.checked || false,
-      intervalSeconds: Number($('[data-k8s-interval]')?.value || 30),
+      intervalSeconds: numberValue($('[data-k8s-interval]'), 30),
       namespaces: ($('[data-k8s-namespaces]')?.value || '').split(',').map((value) => value.trim()).filter(Boolean),
       labelSelector: $('[data-k8s-label]')?.value.trim() || '',
       ingressClass: $('[data-k8s-class]')?.value.trim() || '',
@@ -1328,6 +1364,25 @@ function collectDiscoverySettings() {
       caFile: $('[data-k8s-ca]')?.value.trim() || '',
     },
   };
+}
+
+// stashPendingSettingsEdits copies the active tab's DOM values back into
+// state.settings so switching tabs (or re-rendering after a discovery
+// refresh) does not silently discard in-progress edits. Saving still only
+// submits the active tab; stashed edits simply survive until then.
+function stashPendingSettingsEdits() {
+  if (!state.settings) return;
+  switch (state.settingsTab) {
+    case 'branding': state.settings.branding = collectBrandingSettings(); break;
+    case 'layout': state.settings.layout = collectLayoutSettings(); break;
+    case 'theme': state.settings.theme = collectThemeSettings(); break;
+    case 'search': state.settings.search = collectSearchSettings(); break;
+    case 'status': state.settings.status = collectStatusSettings(); break;
+    case 'weather': state.settings.weather = collectWeatherSettings(); break;
+    case 'discovery': state.settings.discovery = collectDiscoverySettings(); break;
+    case 'integrations': state.settings.widgets = collectIntegrationsSettings(); break;
+    default: break;
+  }
 }
 
 async function saveSettings() {
@@ -1374,7 +1429,10 @@ async function refreshDiscovery() {
     const status = await api('api/v1/discovery/refresh', { method: 'POST', body: {} });
     state.discovery = status;
     await load();
-    if ($('.modal')) renderSettingsModal();
+    if ($('.settings-modal')) {
+      stashPendingSettingsEdits();
+      renderSettingsModal();
+    }
     toast('Discovery refreshed', 'success');
   } catch (error) {
     toast(error.message, 'error');
@@ -1709,7 +1767,7 @@ document.addEventListener('click', async (event) => {
     await reorderSections(currentBoard(), Number(target.dataset.sectionId), action === 'move-section-up' ? -1 : 1);
     return;
   }
-  if (action === 'settings-tab') { state.settingsTab = target.dataset.tab; renderSettingsModal(); return; }
+  if (action === 'settings-tab') { stashPendingSettingsEdits(); state.settingsTab = target.dataset.tab; renderSettingsModal(); return; }
   if (action === 'settings-save') { await saveSettings(); return; }
   if (action === 'add-provider') {
     $('[data-provider-list]')?.insertAdjacentHTML('beforeend', providerRow({ prefix: '/', url: 'https://example.com/search?q=%s' }));
@@ -1767,26 +1825,33 @@ document.addEventListener('submit', async (event) => {
   const form = event.target.closest('form[data-form]');
   if (!form) return;
   event.preventDefault();
-  const kind = form.dataset.form;
-  if (kind === 'login') { await handleLogin(form, false); return; }
-  if (kind === 'setup') { await handleLogin(form, true); return; }
-  if (kind === 'item') { await saveItem(form); return; }
-  if (kind === 'section') { await saveSection(form); return; }
-  if (kind === 'board') { await saveBoard(form); return; }
+  // A second click while the request is in flight would create a duplicate.
+  if (form.dataset.submitting === '1') return;
+  form.dataset.submitting = '1';
+  try {
+    const kind = form.dataset.form;
+    if (kind === 'login') { await handleLogin(form, false); return; }
+    if (kind === 'setup') { await handleLogin(form, true); return; }
+    if (kind === 'item') { await saveItem(form); return; }
+    if (kind === 'section') { await saveSection(form); return; }
+    if (kind === 'board') { await saveBoard(form); return; }
+  } finally {
+    form.dataset.submitting = '0';
+  }
 });
 
 document.addEventListener('keydown', (event) => {
   const tag = event.target.tagName?.toLowerCase();
   const typing = ['input', 'textarea', 'select'].includes(tag);
+  const modifier = event.ctrlKey || event.metaKey || event.altKey;
+  const modalOpen = Boolean($('.modal'));
   if (event.key === 'Escape') {
-    closeModal();
+    if (modalOpen) {
+      closeModal();
+      return;
+    }
     const input = $('[data-search-input]');
     if (input) { input.value = ''; computeSearch(''); renderSearchResults(); }
-    return;
-  }
-  if (!typing && event.key === '/') {
-    event.preventDefault();
-    $('[data-search-input]')?.focus();
     return;
   }
   if (event.target.matches('[data-search-input]')) {
@@ -1802,6 +1867,14 @@ document.addEventListener('keydown', (event) => {
       openSearchResult(state.searchIndex);
       return;
     }
+  }
+  // Shortcuts must not hijack browser combos (Ctrl+1…9, Ctrl+/) or fire
+  // while a modal owns the page.
+  if (modifier || modalOpen) return;
+  if (!typing && event.key === '/') {
+    event.preventDefault();
+    $('[data-search-input]')?.focus();
+    return;
   }
   if (!typing && /^[1-9]$/.test(event.key)) {
     const items = pinnedItems();
@@ -1875,6 +1948,7 @@ function findItem(id) {
 
 window.addEventListener('popstate', () => {
   chooseBoard();
+  computeSearch(state.search || '');
   applyTheme();
   render();
 });

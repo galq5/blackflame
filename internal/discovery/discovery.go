@@ -62,8 +62,19 @@ func (m *Manager) Start(ctx context.Context) {
 }
 
 func (m *Manager) Refresh(ctx context.Context) {
+	// A manual refresh counts as a run: without marking lastRun the next
+	// tick would immediately re-run both sources regardless of the
+	// configured interval.
+	m.markRun("docker")
+	m.markRun("kubernetes")
 	m.runDocker(ctx)
 	m.runKubernetes(ctx)
+}
+
+func (m *Manager) markRun(source string) {
+	m.mu.Lock()
+	m.lastRun[source] = time.Now()
+	m.mu.Unlock()
 }
 
 func (m *Manager) Status() Status {

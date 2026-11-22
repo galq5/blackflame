@@ -31,6 +31,7 @@ func fetchPiHole(ctx context.Context, cfg *config.PiHoleWidget) (any, error) {
 	// Pi-hole v6 uses a session id. If the instance has no password, summary
 	// may be readable without authentication.
 	sid := ""
+	var authErr error
 	if secret != "" {
 		var auth struct {
 			Session struct {
@@ -44,11 +45,20 @@ func fetchPiHole(ctx context.Context, cfg *config.PiHoleWidget) (any, error) {
 		}
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := client.Do(req)
-		if err == nil {
+		if err != nil {
+			authErr = fmt.Errorf("v6 login request failed: %w", err)
+		} else {
 			defer resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
-				_ = json.NewDecoder(resp.Body).Decode(&auth)
-				sid = auth.Session.SID
+				if err := json.NewDecoder(resp.Body).Decode(&auth); err != nil {
+					authErr = fmt.Errorf("decode v6 login response: %w", err)
+				} else if auth.Session.SID == "" {
+					authErr = fmt.Errorf("v6 login returned no session id")
+				} else {
+					sid = auth.Session.SID
+				}
+			} else {
+				authErr = fmt.Errorf("v6 login returned %d", resp.StatusCode)
 			}
 		}
 	}
@@ -93,6 +103,9 @@ func fetchPiHole(ctx context.Context, cfg *config.PiHoleWidget) (any, error) {
 	}
 	endpoint := base + "/admin/api.php?" + query.Encode()
 	if err := getJSON(ctx, client, endpoint, nil, &v5); err != nil {
+		if authErr != nil {
+			return nil, fmt.Errorf("Pi-hole API is not reachable (%s): %w", authErr, err)
+		}
 		return nil, fmt.Errorf("Pi-hole API is not reachable: %w", err)
 	}
 	return PiHoleData{

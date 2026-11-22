@@ -229,21 +229,20 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 }
 
 func buildConfigStore(ctx context.Context, mode config.Mode, dataDir, configPath string) (config.Store, *sql.DB, error) {
-	db, err := openDatabase(mode, dataDir)
-	if err != nil {
-		return nil, nil, err
-	}
-	if err := store.Migrate(ctx, db); err != nil {
-		db.Close()
-		return nil, nil, err
-	}
-	if err := store.EnsureDefaults(ctx, db); err != nil {
-		db.Close()
-		return nil, nil, err
-	}
-
 	switch mode {
 	case config.ModeUI:
+		db, err := openDatabase(mode, dataDir)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := store.Migrate(ctx, db); err != nil {
+			db.Close()
+			return nil, nil, err
+		}
+		if err := store.EnsureDefaults(ctx, db); err != nil {
+			db.Close()
+			return nil, nil, err
+		}
 		cfgStore, err := store.NewSQLiteStore(ctx, db)
 		if err != nil {
 			db.Close()
@@ -251,14 +250,30 @@ func buildConfigStore(ctx context.Context, mode config.Mode, dataDir, configPath
 		}
 		return cfgStore, db, nil
 	case config.ModeGitOps:
+		// Load and validate the YAML before touching disk: an invalid
+		// config should exit cleanly instead of leaving a freshly
+		// created and seeded database behind.
 		cfgStore, err := config.NewYAMLStore(ctx, configPath)
 		if err != nil {
+			return nil, nil, err
+		}
+		db, err := openDatabase(mode, dataDir)
+		if err != nil {
+			_ = cfgStore.Close()
+			return nil, nil, err
+		}
+		if err := store.Migrate(ctx, db); err != nil {
 			db.Close()
+			_ = cfgStore.Close()
+			return nil, nil, err
+		}
+		if err := store.EnsureDefaults(ctx, db); err != nil {
+			db.Close()
+			_ = cfgStore.Close()
 			return nil, nil, err
 		}
 		return cfgStore, db, nil
 	default:
-		db.Close()
 		return nil, nil, fmt.Errorf("unsupported mode %q", mode)
 	}
 }

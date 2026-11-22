@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -568,5 +569,40 @@ func TestLiveStatusAndMetricsRespectVisibilityChanges(t *testing.T) {
 	body := recorder.Body.String()
 	if recorder.Code != http.StatusOK || strings.Contains(body, privateKey+`"`) || !strings.Contains(body, publicKey+`"`) {
 		t.Fatalf("metrics did not respect item visibility: %d\n%s", recorder.Code, body)
+	}
+}
+
+func TestHandleStoreErrorMapping(t *testing.T) {
+	app, cleanup := testApp(t)
+	defer cleanup()
+	srv := &Server{app: app, logger: app.Logger}
+
+	recorder := httptest.NewRecorder()
+	srv.handleStoreError(recorder, store.ErrNotFound)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for ErrNotFound, got %d", recorder.Code)
+	}
+
+	// A duplicate board slug is a driver unique violation.
+	_, err := store.CreateBoard(context.Background(), app.DB, "home", "Duplicate", true)
+	if err == nil {
+		t.Fatal("expected duplicate slug insert to fail")
+	}
+	recorder = httptest.NewRecorder()
+	srv.handleStoreError(recorder, err)
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for unique violation, got %d", recorder.Code)
+	}
+	if strings.Contains(recorder.Body.String(), "UNIQUE constraint failed") {
+		t.Fatalf("driver error text leaked to the client: %s", recorder.Body.String())
+	}
+
+	recorder = httptest.NewRecorder()
+	srv.handleStoreError(recorder, errors.New("database is locked: /data/blackflame.db"))
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for unknown store errors, got %d", recorder.Code)
+	}
+	if strings.Contains(recorder.Body.String(), "database is locked") {
+		t.Fatalf("internal error text leaked to the client: %s", recorder.Body.String())
 	}
 }

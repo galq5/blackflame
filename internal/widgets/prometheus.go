@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -82,7 +83,9 @@ func fetchPrometheus(ctx context.Context, cfg *config.PrometheusWidget) (any, er
 		value := 0.0
 		if len(payload.Data.Result) > 0 && len(payload.Data.Result[0].Value) > 1 {
 			if raw, ok := payload.Data.Result[0].Value[1].(string); ok {
-				value, _ = strconv.ParseFloat(raw, 64)
+				if parsed, err := strconv.ParseFloat(raw, 64); err == nil && !math.IsNaN(parsed) && !math.IsInf(parsed, 0) {
+					value = parsed
+				}
 			}
 		}
 		data.Queries = append(data.Queries, PrometheusValue{

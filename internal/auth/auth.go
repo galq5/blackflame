@@ -69,7 +69,7 @@ func (m *Manager) PasswordConfigured(ctx context.Context) (bool, error) {
 }
 
 func (m *Manager) SetPassword(ctx context.Context, password string) error {
-	if len(strings.TrimSpace(password)) < 8 {
+	if len(password) < 8 {
 		return fmt.Errorf("password must be at least 8 characters")
 	}
 	configured, err := m.PasswordConfigured(ctx)
@@ -251,6 +251,10 @@ func newLimiter(max int, window time.Duration) *limiter {
 	return &limiter{max: max, window: window, attempts: map[string]*attempt{}}
 }
 
+// maxTrackedAttempts bounds the limiter map so attacker-supplied keys can
+// grow it (and the sweep cost) without limit.
+const maxTrackedAttempts = 8192
+
 func (l *limiter) Allow(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -262,6 +266,11 @@ func (l *limiter) Allow(key string) bool {
 	}
 	entry, ok := l.attempts[key]
 	if !ok || now.After(entry.reset) {
+		if len(l.attempts) >= maxTrackedAttempts {
+			// Fail closed: unknown keys are refused once the table is
+			// full rather than letting it grow unboundedly.
+			return false
+		}
 		l.attempts[key] = &attempt{count: 1, reset: now.Add(l.window)}
 		return true
 	}

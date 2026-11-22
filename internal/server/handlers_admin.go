@@ -91,12 +91,10 @@ func (s *Server) handleCreateBoard(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := store.CreateBoard(r.Context(), s.app.DB, payload.Slug, payload.Name, public)
 	if err != nil {
-		handleStoreError(w, err)
+		s.handleStoreError(w, err)
 		return
 	}
-	if err := s.app.Reload(r.Context()); err != nil {
-		s.logger.Warn("reload after board create", "error", err)
-	}
+	s.reloadAfterMutation(r)
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
 }
 
@@ -121,10 +119,10 @@ func (s *Server) handleUpdateBoard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := store.UpdateBoard(r.Context(), s.app.DB, id, payload.Slug, payload.Name, public); err != nil {
-		handleStoreError(w, err)
+		s.handleStoreError(w, err)
 		return
 	}
-	_ = s.app.Reload(r.Context())
+	s.reloadAfterMutation(r)
 	writeNoContent(w)
 }
 
@@ -142,10 +140,10 @@ func (s *Server) handleDeleteBoard(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "last_board", err.Error())
 			return
 		}
-		handleStoreError(w, err)
+		s.handleStoreError(w, err)
 		return
 	}
-	_ = s.app.Reload(r.Context())
+	s.reloadAfterMutation(r)
 	writeNoContent(w)
 }
 
@@ -165,10 +163,10 @@ func (s *Server) handleCreateSection(w http.ResponseWriter, r *http.Request) {
 	public := payload.Public == nil || *payload.Public
 	id, err := store.CreateSection(r.Context(), s.app.DB, payload.BoardID, payload.Name, public, payload.Pinned)
 	if err != nil {
-		handleStoreError(w, err)
+		s.handleStoreError(w, err)
 		return
 	}
-	_ = s.app.Reload(r.Context())
+	s.reloadAfterMutation(r)
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
 }
 
@@ -192,10 +190,10 @@ func (s *Server) handleUpdateSection(w http.ResponseWriter, r *http.Request) {
 	}
 	public := payload.Public == nil || *payload.Public
 	if err := store.UpdateSection(r.Context(), s.app.DB, id, payload.Name, public, payload.Pinned); err != nil {
-		handleStoreError(w, err)
+		s.handleStoreError(w, err)
 		return
 	}
-	_ = s.app.Reload(r.Context())
+	s.reloadAfterMutation(r)
 	writeNoContent(w)
 }
 
@@ -209,10 +207,10 @@ func (s *Server) handleDeleteSection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := store.DeleteSection(r.Context(), s.app.DB, id); err != nil {
-		handleStoreError(w, err)
+		s.handleStoreError(w, err)
 		return
 	}
-	_ = s.app.Reload(r.Context())
+	s.reloadAfterMutation(r)
 	writeNoContent(w)
 }
 
@@ -230,10 +228,10 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := store.CreateItem(r.Context(), s.app.DB, itemInput(payload))
 	if err != nil {
-		handleStoreError(w, err)
+		s.handleStoreError(w, err)
 		return
 	}
-	_ = s.app.Reload(r.Context())
+	s.reloadAfterMutation(r)
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
 }
 
@@ -255,10 +253,10 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := store.UpdateItem(r.Context(), s.app.DB, id, itemInput(payload)); err != nil {
-		handleStoreError(w, err)
+		s.handleStoreError(w, err)
 		return
 	}
-	_ = s.app.Reload(r.Context())
+	s.reloadAfterMutation(r)
 	writeNoContent(w)
 }
 
@@ -272,10 +270,10 @@ func (s *Server) handleDeleteItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := store.DeleteItem(r.Context(), s.app.DB, id); err != nil {
-		handleStoreError(w, err)
+		s.handleStoreError(w, err)
 		return
 	}
-	_ = s.app.Reload(r.Context())
+	s.reloadAfterMutation(r)
 	writeNoContent(w)
 }
 
@@ -292,10 +290,10 @@ func (s *Server) handleReorderItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := store.ReorderItems(r.Context(), s.app.DB, payload.SectionID, payload.IDs); err != nil {
-		handleStoreError(w, err)
+		s.handleStoreError(w, err)
 		return
 	}
-	_ = s.app.Reload(r.Context())
+	s.reloadAfterMutation(r)
 	writeNoContent(w)
 }
 
@@ -312,10 +310,10 @@ func (s *Server) handleReorderSections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := store.ReorderSections(r.Context(), s.app.DB, payload.BoardID, payload.IDs); err != nil {
-		handleStoreError(w, err)
+		s.handleStoreError(w, err)
 		return
 	}
-	_ = s.app.Reload(r.Context())
+	s.reloadAfterMutation(r)
 	writeNoContent(w)
 }
 
@@ -389,10 +387,10 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := store.SaveSettings(r.Context(), s.app.DB, cfg); err != nil {
-		handleStoreError(w, err)
+		s.handleStoreError(w, err)
 		return
 	}
-	_ = s.app.Reload(r.Context())
+	s.reloadAfterMutation(r)
 	writeNoContent(w)
 }
 
@@ -400,7 +398,20 @@ func (s *Server) handleImportFlame(w http.ResponseWriter, r *http.Request) {
 	if s.requireWritableAdminMutation(w, r) == nil {
 		return
 	}
+	const maxImport = 64 << 20
+	if r.ContentLength > maxImport {
+		writeError(w, http.StatusRequestEntityTooLarge, "import_too_large", "Flame database must be smaller than 64 MiB")
+		return
+	}
+	// Bound the body before parsing so oversized uploads are cut off while
+	// streaming instead of spooling to disk first.
+	r.Body = http.MaxBytesReader(w, r.Body, maxImport+(1<<20))
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "import_too_large", "Flame database must be smaller than 64 MiB")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid_upload", "invalid multipart upload")
 		return
 	}
@@ -413,12 +424,12 @@ func (s *Server) handleImportFlame(w http.ResponseWriter, r *http.Request) {
 
 	temp, err := os.CreateTemp("", "blackflame-flame-*.sqlite")
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "import_failed", err.Error())
+		s.logger.Error("create import temp file", "error", err)
+		writeError(w, http.StatusInternalServerError, "import_failed", "import could not be prepared")
 		return
 	}
 	tempPath := temp.Name()
 	defer os.Remove(tempPath)
-	const maxImport = 64 << 20
 	written, err := io.Copy(temp, io.LimitReader(file, maxImport+1))
 	if err != nil {
 		temp.Close()
@@ -438,7 +449,7 @@ func (s *Server) handleImportFlame(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "import_failed", err.Error())
 		return
 	}
-	_ = s.app.Reload(r.Context())
+	s.reloadAfterMutation(r)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -463,11 +474,14 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDiscoveryRefresh(w http.ResponseWriter, r *http.Request) {
-	if s.requireWritableAdminMutation(w, r) == nil {
+	// The background discovery loop performs the same DB writes in gitops
+	// mode (discovered items live in a side table, not the YAML), so the
+	// manual trigger only needs auth and CSRF, not the read-only gate.
+	if s.requireAdminMutation(w, r) == nil {
 		return
 	}
 	s.app.Discovery.Refresh(r.Context())
-	_ = s.app.Reload(r.Context())
+	s.reloadAfterMutation(r)
 	writeJSON(w, http.StatusOK, s.app.Discovery.Status())
 }
 

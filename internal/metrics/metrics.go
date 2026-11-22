@@ -3,6 +3,7 @@ package metrics
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,6 +23,15 @@ func New() *Registry {
 }
 
 func (r *Registry) IncHTTP(method string, code int) {
+	// The method comes straight off the request line and is attacker
+	// controlled; unknown methods must not mint new map entries forever.
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+		http.MethodPatch, http.MethodDelete, http.MethodOptions, http.MethodConnect,
+		http.MethodTrace:
+	default:
+		method = "other"
+	}
 	r.mu.Lock()
 	r.httpRequests[method+"\x00"+strconv.Itoa(code)]++
 	r.mu.Unlock()
@@ -43,8 +53,17 @@ func (r *Registry) IncDiscoveryError() {
 }
 
 func (r *Registry) WriteBase(w io.Writer, version, mode string) {
+	// Snapshot the counters under the lock, then write outside of it: the
+	// writer may be a slow or stalled socket, and holding the mutex across
+	// the writes would block every request doing IncHTTP/IncStatus.
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	requests := make(map[string]uint64, len(r.httpRequests))
+	for key, value := range r.httpRequests {
+		requests[key] = value
+	}
+	statusChecks, statusErrors := r.statusChecks, r.statusErrors
+	discoveryErrors := r.discoveryErrors
+	r.mu.Unlock()
 
 	fmt.Fprintln(w, "# HELP blackflame_build_info Build information.")
 	fmt.Fprintln(w, "# TYPE blackflame_build_info gauge")
@@ -62,19 +81,19 @@ func (r *Registry) WriteBase(w io.Writer, version, mode string) {
 		if len(parts) != 2 {
 			continue
 		}
-		fmt.Fprintf(w, "blackflame_http_requests_total{method=%q,code=%q} %d\n", parts[0], parts[1], r.httpRequests[key])
+		fmt.Fprintf(w, "blackflame_http_requests_total{method=%q,code=%q} %d\n", parts[0], parts[1], requests[key])
 	}
 
 	fmt.Fprintln(w, "# HELP blackflame_status_checks_total Status checks performed.")
 	fmt.Fprintln(w, "# TYPE blackflame_status_checks_total counter")
-	fmt.Fprintf(w, "blackflame_status_checks_total %d\n", r.statusChecks)
+	fmt.Fprintf(w, "blackflame_status_checks_total %d\n", statusChecks)
 
 	fmt.Fprintln(w, "# HELP blackflame_status_check_errors_total Failed status checks.")
 	fmt.Fprintln(w, "# TYPE blackflame_status_check_errors_total counter")
-	fmt.Fprintf(w, "blackflame_status_check_errors_total %d\n", r.statusErrors)
+	fmt.Fprintf(w, "blackflame_status_check_errors_total %d\n", statusErrors)
 
 	fmt.Fprintln(w, "# HELP blackflame_discovery_errors_total Discovery errors.")
 	fmt.Fprintln(w, "# TYPE blackflame_discovery_errors_total counter")
-	fmt.Fprintf(w, "blackflame_discovery_errors_total %d\n", r.discoveryErrors)
+	fmt.Fprintf(w, "blackflame_discovery_errors_total %d\n", discoveryErrors)
 
 }

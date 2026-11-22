@@ -28,7 +28,8 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	configured, err := s.app.Auth.PasswordConfigured(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "auth_unavailable", err.Error())
+		s.logger.Error("check password configuration", "error", err)
+		writeError(w, http.StatusInternalServerError, "auth_unavailable", "authentication is temporarily unavailable")
 		return
 	}
 	if configured {
@@ -44,12 +45,12 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.app.Auth.SetPassword(r.Context(), payload.Password); err != nil {
-		handleStoreError(w, err)
+		s.handleStoreError(w, err)
 		return
 	}
 	session, err := s.app.Auth.Login(r.Context(), payload.Password, clientIP(r))
 	if err != nil {
-		handleStoreError(w, err)
+		s.handleStoreError(w, err)
 		return
 	}
 	s.setSessionCookie(w, r, session)
@@ -64,7 +65,8 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	configured, err := s.app.Auth.PasswordConfigured(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "auth_unavailable", err.Error())
+		s.logger.Error("check password configuration", "error", err)
+		writeError(w, http.StatusInternalServerError, "auth_unavailable", "authentication is temporarily unavailable")
 		return
 	}
 	if !configured {
@@ -81,7 +83,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnauthorized, "invalid_password", "invalid password")
 			return
 		}
-		handleStoreError(w, err)
+		s.handleStoreError(w, err)
 		return
 	}
 	s.setSessionCookie(w, r, session)

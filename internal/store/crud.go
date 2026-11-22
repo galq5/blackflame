@@ -29,11 +29,12 @@ type ItemInput struct {
 }
 
 func CreateBoard(ctx context.Context, db *sql.DB, slug, name string, public bool) (int64, error) {
-	var order int
-	_ = db.QueryRowContext(ctx, `SELECT COALESCE(MAX(sort_order), -1) + 1 FROM boards`).Scan(&order)
+	// sort_order is computed inside the INSERT so two concurrent creates
+	// cannot observe the same MAX() and tie.
 	result, err := db.ExecContext(ctx, `
 		INSERT INTO boards(slug, name, is_public, sort_order)
-		VALUES (?, ?, ?, ?)`, slug, name, boolInt(public), order)
+		VALUES (?, ?, ?, COALESCE((SELECT MAX(sort_order) FROM boards), -1) + 1)`,
+		slug, name, boolInt(public))
 	if err != nil {
 		return 0, fmt.Errorf("create board: %w", err)
 	}
@@ -52,26 +53,37 @@ func UpdateBoard(ctx context.Context, db *sql.DB, id int64, slug, name string, p
 }
 
 func DeleteBoard(ctx context.Context, db *sql.DB, id int64) error {
-	var count int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM boards`).Scan(&count); err != nil {
-		return fmt.Errorf("count boards: %w", err)
-	}
-	if count <= 1 {
-		return ErrLastBoard
-	}
-	result, err := db.ExecContext(ctx, `DELETE FROM boards WHERE id = ?`, id)
+	// The count guard and the delete must be decided atomically: with two
+	// separate statements, concurrent deletes of a 2-board database both
+	// pass the guard and leave zero boards behind.
+	result, err := db.ExecContext(ctx, `
+		DELETE FROM boards
+		WHERE id = ? AND (SELECT COUNT(*) FROM boards) > 1`, id)
 	if err != nil {
 		return fmt.Errorf("delete board: %w", err)
 	}
-	return requireAffected(result)
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete board: %w", err)
+	}
+	if affected > 0 {
+		return nil
+	}
+	var exists int
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM boards WHERE id = ?)`, id).Scan(&exists); err != nil {
+		return fmt.Errorf("check board: %w", err)
+	}
+	if exists == 1 {
+		return ErrLastBoard
+	}
+	return ErrNotFound
 }
 
 func CreateSection(ctx context.Context, db *sql.DB, boardID int64, name string, public, pinned bool) (int64, error) {
-	var order int
-	_ = db.QueryRowContext(ctx, `SELECT COALESCE(MAX(sort_order), -1) + 1 FROM sections WHERE board_id = ?`, boardID).Scan(&order)
 	result, err := db.ExecContext(ctx, `
 		INSERT INTO sections(board_id, name, is_public, is_pinned, sort_order)
-		VALUES (?, ?, ?, ?, ?)`, boardID, name, boolInt(public), boolInt(pinned), order)
+		VALUES (?, ?, ?, ?, COALESCE((SELECT MAX(sort_order) FROM sections WHERE board_id = ?), -1) + 1)`,
+		boardID, name, boolInt(public), boolInt(pinned), boardID)
 	if err != nil {
 		return 0, fmt.Errorf("create section: %w", err)
 	}
@@ -97,8 +109,9 @@ func DeleteSection(ctx context.Context, db *sql.DB, id int64) error {
 }
 
 func CreateItem(ctx context.Context, db *sql.DB, input ItemInput) (int64, error) {
-	var order int
-	_ = db.QueryRowContext(ctx, `SELECT COALESCE(MAX(sort_order), -1) + 1 FROM items WHERE section_id = ?`, input.SectionID).Scan(&order)
+	if err := requireSectionBoard(ctx, db, input.SectionID, input.BoardID); err != nil {
+		return 0, err
+	}
 	configJSON, err := marshalConfig(input.Config)
 	if err != nil {
 		return 0, err
@@ -108,10 +121,11 @@ func CreateItem(ctx context.Context, db *sql.DB, input ItemInput) (int64, error)
 			board_id, section_id, kind, name, url, icon, description,
 			is_public, is_pinned, is_hidden, check_enabled, source,
 			config_json, sort_order
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?,
+			COALESCE((SELECT MAX(sort_order) FROM items WHERE section_id = ?), -1) + 1)`,
 		input.BoardID, input.SectionID, input.Kind, input.Name, input.URL, input.Icon,
 		input.Description, boolInt(input.Public), boolInt(input.Pinned), boolInt(input.Hidden),
-		boolInt(input.CheckEnabled), configJSON, order,
+		boolInt(input.CheckEnabled), configJSON, input.SectionID,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("create item: %w", err)
@@ -120,6 +134,9 @@ func CreateItem(ctx context.Context, db *sql.DB, input ItemInput) (int64, error)
 }
 
 func UpdateItem(ctx context.Context, db *sql.DB, id int64, input ItemInput) error {
+	if err := requireSectionBoard(ctx, db, input.SectionID, input.BoardID); err != nil {
+		return err
+	}
 	configJSON, err := marshalConfig(input.Config)
 	if err != nil {
 		return err
@@ -140,6 +157,22 @@ func UpdateItem(ctx context.Context, db *sql.DB, id int64, input ItemInput) erro
 		return fmt.Errorf("update item: %w", err)
 	}
 	return requireAffected(result)
+}
+
+// requireSectionBoard rejects board/section pairs that point into different
+// boards; the schema's foreign keys only prove existence, not belonging.
+func requireSectionBoard(ctx context.Context, db *sql.DB, sectionID, boardID int64) error {
+	var exists int
+	err := db.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM sections WHERE id = ? AND board_id = ?)`,
+		sectionID, boardID).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("check section board: %w", err)
+	}
+	if exists != 1 {
+		return fmt.Errorf("section %d does not belong to board %d", sectionID, boardID)
+	}
+	return nil
 }
 
 func DeleteItem(ctx context.Context, db *sql.DB, id int64) error {

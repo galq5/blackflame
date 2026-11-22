@@ -169,6 +169,8 @@ func (c *Config) Validate() error {
 		}
 		if c.Status.ExpectedStatus != "" && !statusRE.MatchString(c.Status.ExpectedStatus) {
 			add("status.expectedStatus", "must be a status code or range such as 200-399")
+		} else if _, _, err := ParseStatusRange(c.Status.ExpectedStatus); err != nil {
+			add("status.expectedStatus", err.Error())
 		}
 	}
 
@@ -246,6 +248,11 @@ func ParseStatusRange(value string) (int, int, error) {
 		end, err := strconv.Atoi(parts[1])
 		if err != nil {
 			return 0, 0, err
+		}
+		if start > end {
+			// An inverted range is never satisfiable and would silently
+			// mark every check as down.
+			return 0, 0, fmt.Errorf("status range start %d is greater than end %d", start, end)
 		}
 		return start, end, nil
 	}

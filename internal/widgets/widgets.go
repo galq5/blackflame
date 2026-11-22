@@ -8,6 +8,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,6 +53,7 @@ type widgetJob struct {
 	title      string
 	public     bool
 	refresh    time.Duration
+	budget     time.Duration
 	fetch      func(context.Context) (any, error)
 }
 
@@ -75,7 +78,10 @@ func (m *Manager) Cards(ctx context.Context, widgets config.Widgets, publicOnly 
 			title:      titleOr(cfg.Title, "Proxmox"),
 			public:     cfg.Public,
 			refresh:    cfg.Refresh(),
-			fetch:      func(ctx context.Context) (any, error) { return fetchProxmox(ctx, cfg) },
+			// One round trip per node: give larger clusters room inside
+			// the fetch budget instead of a guaranteed deadline error.
+			budget: 60 * time.Second,
+			fetch:  func(ctx context.Context) (any, error) { return fetchProxmox(ctx, cfg) },
 		})
 	}
 	if widgets.Kubernetes != nil && widgets.Kubernetes.Enabled {
@@ -86,7 +92,9 @@ func (m *Manager) Cards(ctx context.Context, widgets config.Widgets, publicOnly 
 			title:      titleOr(cfg.Title, "Kubernetes"),
 			public:     cfg.Public,
 			refresh:    cfg.Refresh(),
-			fetch:      func(ctx context.Context) (any, error) { return fetchKubernetes(ctx, cfg) },
+			// One round trip per namespace: same reasoning as Proxmox.
+			budget: 60 * time.Second,
+			fetch:  func(ctx context.Context) (any, error) { return fetchKubernetes(ctx, cfg) },
 		})
 	}
 	if widgets.Prometheus != nil && widgets.Prometheus.Enabled {
@@ -170,7 +178,11 @@ func (m *Manager) card(ctx context.Context, job widgetJob) Card {
 		}
 	}
 
-	fetchCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	budget := job.budget
+	if budget <= 0 {
+		budget = 15 * time.Second
+	}
+	fetchCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	data, err := job.fetch(fetchCtx)
 	card := Card{
@@ -234,8 +246,35 @@ func newHTTPClient(insecure bool) *http.Client {
 			MinVersion:         tls.VersionTLS12,
 			InsecureSkipVerify: insecure, // #nosec G402 -- explicit per-widget opt-in
 		},
+		// Bound how long an abandoned keep-alive connection (and its
+		// readLoop goroutine) can linger after a fetch completes.
+		IdleConnTimeout: 30 * time.Second,
 	}
 	return &http.Client{Transport: transport, Timeout: 15 * time.Second}
+}
+
+// redactURL masks credential-like query values so fetch errors never echo
+// secrets (e.g. a Pi-hole v5 auth token in the URL) back to the dashboard
+// or into the logs.
+func redactURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.RawQuery == "" {
+		return raw
+	}
+	query := parsed.Query()
+	changed := false
+	for key := range query {
+		switch strings.ToLower(key) {
+		case "auth", "password", "pass", "token", "secret", "sid", "key", "apikey", "api_key":
+			query.Set(key, "REDACTED")
+			changed = true
+		}
+	}
+	if !changed {
+		return raw
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }
 
 func getJSON(ctx context.Context, client *http.Client, url string, headers map[string]string, target any) error {
@@ -253,10 +292,10 @@ func getJSON(ctx context.Context, client *http.Client, url string, headers map[s
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return fmt.Errorf("%s returned %d: %s", url, resp.StatusCode, string(body))
+		return fmt.Errorf("%s returned %d: %s", redactURL(url), resp.StatusCode, string(body))
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(target); err != nil {
-		return fmt.Errorf("decode %s: %w", url, err)
+		return fmt.Errorf("decode %s: %w", redactURL(url), err)
 	}
 	return nil
 }

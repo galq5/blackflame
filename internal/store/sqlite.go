@@ -47,8 +47,17 @@ func OpenSQLite(path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
-	db.SetMaxOpenConns(4)
-	db.SetMaxIdleConns(4)
+	if path == ":memory:" {
+		// Shared-cache in-memory SQLite takes table-level locks, and
+		// SQLITE_LOCKED conflicts are not retried by busy_timeout. With a
+		// connection pool those conflicts surface as spurious "database
+		// table is locked" errors, so pin the whole DB to one connection.
+		db.SetMaxOpenConns(1)
+		db.SetMaxIdleConns(1)
+	} else {
+		db.SetMaxOpenConns(4)
+		db.SetMaxIdleConns(4)
+	}
 	db.SetConnMaxLifetime(0)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -103,7 +112,15 @@ func EnsureDefaults(ctx context.Context, db *sql.DB) error {
 		return nil
 	}
 
-	result, err := db.ExecContext(ctx, `INSERT INTO boards(slug, name, is_public, sort_order) VALUES ('home', 'Home', 1, 0)`)
+	// Seed the home board and its sections in one transaction so a crash
+	// between the inserts cannot leave a permanently section-less board
+	// (the count check above would skip re-seeding on every later start).
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin defaults: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `INSERT INTO boards(slug, name, is_public, sort_order) VALUES ('home', 'Home', 1, 0)`)
 	if err != nil {
 		return fmt.Errorf("seed default board: %w", err)
 	}
@@ -111,8 +128,11 @@ func EnsureDefaults(ctx context.Context, db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("default board id: %w", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO sections(board_id, name, is_public, sort_order) VALUES (?, 'Apps', 1, 0), (?, 'Bookmarks', 1, 1)`, boardID, boardID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sections(board_id, name, is_public, sort_order) VALUES (?, 'Apps', 1, 0), (?, 'Bookmarks', 1, 1)`, boardID, boardID); err != nil {
 		return fmt.Errorf("seed default sections: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit defaults: %w", err)
 	}
 	return nil
 }

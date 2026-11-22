@@ -43,3 +43,13 @@ Out of scope:
 - No arbitrary command execution.
 - No telemetry.
 - Container images run as non-root and support a read-only root filesystem.
+
+## Proxies and rate limiting
+
+Login attempts are rate limited per source address, and `X-Forwarded-For` is
+ignored by default: the header is client-controlled and trusting it would let
+an attacker bypass the limiter with arbitrary values. If Blackflame runs behind
+a reverse proxy that terminates client connections, set
+`BLACKFLAME_TRUST_FORWARDED_FOR=1` to key the limiter on the appended
+(rightmost) forwarded entry instead of the proxy address. Only enable it when
+every request reaches the app through that proxy.

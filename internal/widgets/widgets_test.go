@@ -135,3 +135,17 @@ func TestWidgetValidation(t *testing.T) {
 		t.Fatal("expected invalid calendar widget to fail validation")
 	}
 }
+
+func TestRedactURLHidesSecrets(t *testing.T) {
+	redacted := redactURL("http://pihole.local/admin/api.php?summaryRaw=&auth=supersecret")
+	if strings.Contains(redacted, "supersecret") {
+		t.Fatalf("secret leaked into error URL: %s", redacted)
+	}
+	if !strings.Contains(redacted, "auth=REDACTED") {
+		t.Fatalf("expected the auth parameter to be masked: %s", redacted)
+	}
+	unchanged := redactURL("http://prometheus.local/api/v1/query?query=up")
+	if unchanged != "http://prometheus.local/api/v1/query?query=up" {
+		t.Fatalf("non-sensitive URL was rewritten: %s", unchanged)
+	}
+}

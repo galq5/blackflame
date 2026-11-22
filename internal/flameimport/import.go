@@ -46,7 +46,12 @@ type flameBookmark struct {
 }
 
 func Import(ctx context.Context, target *sql.DB, flamePath string, replace bool) (Result, error) {
-	source, err := sql.Open("sqlite", "file:"+flamePath+"?mode=ro")
+	// Escape the characters that would otherwise terminate the path portion
+	// of the DSN, and wait briefly on locks so importing from a running
+	// Flame instance does not fail instantly.
+	escapedPath := strings.ReplaceAll(flamePath, "?", "%3F")
+	escapedPath = strings.ReplaceAll(escapedPath, "#", "%23")
+	source, err := sql.Open("sqlite", "file:"+escapedPath+"?mode=ro&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return Result{}, fmt.Errorf("open Flame database: %w", err)
 	}
@@ -177,7 +182,7 @@ func Import(ctx context.Context, target *sql.DB, flamePath string, replace bool)
 
 func readApps(ctx context.Context, db *sql.DB) ([]flameApp, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT name, url, COALESCE(icon, ''), COALESCE(isPinned, 0),
+		SELECT COALESCE(name, ''), COALESCE(url, ''), COALESCE(icon, ''), COALESCE(isPinned, 0),
 		       COALESCE(orderId, 0), COALESCE(isPublic, 1), COALESCE(description, '')
 		FROM apps`)
 	if err != nil {
@@ -193,6 +198,10 @@ func readApps(ctx context.Context, db *sql.DB) ([]flameApp, error) {
 		}
 		app.Pinned = pinned == 1
 		app.Public = public == 1
+		// A single NULL row must not abort the whole import; a padded URL
+		// would silently disable status checks later.
+		app.Name = strings.TrimSpace(app.Name)
+		app.URL = strings.TrimSpace(app.URL)
 		apps = append(apps, app)
 	}
 	return apps, rows.Err()
@@ -200,7 +209,7 @@ func readApps(ctx context.Context, db *sql.DB) ([]flameApp, error) {
 
 func readCategories(ctx context.Context, db *sql.DB) ([]flameCategory, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, name, COALESCE(isPinned, 0), COALESCE(orderId, 0), COALESCE(isPublic, 1)
+		SELECT id, COALESCE(name, ''), COALESCE(isPinned, 0), COALESCE(orderId, 0), COALESCE(isPublic, 1)
 		FROM categories`)
 	if err != nil {
 		return nil, fmt.Errorf("read Flame categories: %w", err)
@@ -213,6 +222,7 @@ func readCategories(ctx context.Context, db *sql.DB) ([]flameCategory, error) {
 		if err := rows.Scan(&category.ID, &category.Name, &pinned, &category.Order, &public); err != nil {
 			return nil, fmt.Errorf("scan Flame category: %w", err)
 		}
+		category.Name = strings.TrimSpace(category.Name)
 		category.Pinned = pinned == 1
 		category.Public = public == 1
 		categories = append(categories, category)
@@ -222,7 +232,8 @@ func readCategories(ctx context.Context, db *sql.DB) ([]flameCategory, error) {
 
 func readBookmarks(ctx context.Context, db *sql.DB) ([]flameBookmark, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT name, url, categoryId, COALESCE(icon, ''), COALESCE(isPublic, 1), COALESCE(orderId, 0)
+		SELECT COALESCE(name, ''), COALESCE(url, ''), COALESCE(categoryId, 0),
+		       COALESCE(icon, ''), COALESCE(isPublic, 1), COALESCE(orderId, 0)
 		FROM bookmarks`)
 	if err != nil {
 		return nil, fmt.Errorf("read Flame bookmarks: %w", err)
@@ -235,6 +246,10 @@ func readBookmarks(ctx context.Context, db *sql.DB) ([]flameBookmark, error) {
 		if err := rows.Scan(&bookmark.Name, &bookmark.URL, &bookmark.CategoryID, &bookmark.Icon, &public, &bookmark.Order); err != nil {
 			return nil, fmt.Errorf("scan Flame bookmark: %w", err)
 		}
+		// A NULL categoryId falls back to the Bookmarks section via the
+		// sectionByCategory lookup instead of failing the scan.
+		bookmark.Name = strings.TrimSpace(bookmark.Name)
+		bookmark.URL = strings.TrimSpace(bookmark.URL)
 		bookmark.Public = public == 1
 		bookmarks = append(bookmarks, bookmark)
 	}

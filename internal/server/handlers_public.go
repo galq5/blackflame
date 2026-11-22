@@ -31,7 +31,13 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		code = http.StatusServiceUnavailable
 	}
 	if snapshot.Err != nil {
-		response["configError"] = snapshot.Err.Error()
+		// Load errors can contain filesystem paths; keep the detail for
+		// authenticated callers only.
+		if s.sessionFromRequest(r.Context(), r) != nil {
+			response["configError"] = snapshot.Err.Error()
+		} else {
+			response["configError"] = true
+		}
 		if code == http.StatusOK {
 			response["status"] = "degraded"
 		}
@@ -142,7 +148,13 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		response.CSRF = session.CSRF
 	}
 	if snapshot.Err != nil {
-		response.ConfigError = snapshot.Err.Error()
+		// Load errors can contain filesystem paths; keep the detail for
+		// authenticated callers only.
+		if authenticated {
+			response.ConfigError = snapshot.Err.Error()
+		} else {
+			response.ConfigError = "configuration failed to load"
+		}
 	}
 	if authenticated {
 		response.Discovery = s.app.Discovery.Status()
@@ -215,17 +227,23 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(payload, &event); err != nil {
 				continue
 			}
+			if authenticated {
+				authenticated = s.sessionFromRequest(ctx, r) != nil
+			}
 			if event.Type == "status" {
 				var result statuspkg.Result
 				if err := json.Unmarshal(event.Data, &result); err != nil {
 					continue
 				}
-				if authenticated {
-					authenticated = s.sessionFromRequest(ctx, r) != nil
-				}
 				if !statusVisible(s.app.Config(ctx), result.Key, authenticated) {
 					continue
 				}
+			} else if !authenticated {
+				// Default-deny: no other event type has a visibility
+				// filter today, so anonymous streams only ever receive
+				// status events rather than whatever a future publisher
+				// emits.
+				continue
 			}
 			fmt.Fprintf(w, "data: %s\n\n", payload)
 			flusher.Flush()

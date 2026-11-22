@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -283,11 +284,29 @@ func blockedTarget(rawURL string) bool {
 	}
 	host := strings.ToLower(parsed.Hostname())
 	switch host {
-	case "169.254.169.254", "metadata.google.internal", "metadata", "fd00:ec2::254":
+	case "metadata.google.internal", "metadata":
 		return true
-	default:
+	case "fd00:ec2::254":
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
 		return false
 	}
+	// Normalize IPv4-mapped IPv6 so http://[::ffff:169.254.169.254]/ cannot
+	// slip past the literal comparisons below.
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+	switch {
+	case ip.IsLinkLocalUnicast(), ip.IsLinkLocalMulticast():
+		// 169.254.169.254 and friends on every platform.
+		return true
+	case ip.Equal(net.ParseIP("100.100.100.200")):
+		// Alibaba metadata endpoint.
+		return true
+	}
+	return false
 }
 
 func boolInt(value bool) int {
