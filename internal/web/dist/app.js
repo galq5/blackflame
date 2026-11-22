@@ -880,15 +880,24 @@ function renderSettingsModal() {
   ];
   openModal(`
     ${modalHeader('Settings', 'Changes apply immediately after saving.')}
-    <div class="modal-body">
-      <div class="tabs">${tabs.map(([id, label]) => `<button type="button" class="tab ${state.settingsTab === id ? 'active' : ''}" data-action="settings-tab" data-tab="${id}">${label}</button>`).join('')}</div>
-      ${renderSettingsBody()}
+    <div class="modal-body settings-layout">
+      <nav class="tabs settings-nav" aria-label="Settings categories">${tabs.map(([id, label]) => `<button type="button" class="tab ${state.settingsTab === id ? 'active' : ''}" data-action="settings-tab" data-tab="${id}" ${state.settingsTab === id ? 'aria-current="page"' : ''}>${label}</button>`).join('')}</nav>
+      <section class="settings-panel" aria-label="${esc(tabs.find(([id]) => id === state.settingsTab)?.[1] || 'Theme')}">
+        ${renderSettingsBody()}
+      </section>
     </div>
     <div class="modal-footer">
       ${['branding', 'layout', 'theme', 'search', 'status', 'weather', 'discovery', 'integrations'].includes(state.settingsTab) ? `<button type="button" class="btn primary" data-action="settings-save">Save changes</button>` : ''}
       <button type="button" class="btn ghost" data-action="close-modal">Close</button>
     </div>
   `, true, true);
+  $('#modal-root .modal')?.classList.add('settings-modal');
+  const navigation = $('.settings-nav');
+  const activeTab = $('.settings-nav .active');
+  if (navigation && activeTab && navigation.scrollWidth > navigation.clientWidth) {
+    navigation.scrollLeft = activeTab.offsetLeft - navigation.offsetLeft - 12;
+  }
+
 }
 
 function renderSettingsBody() {
@@ -912,7 +921,7 @@ function renderBrandingSettings(branding) {
     <div class="form-grid">
       <div class="field"><label>Dashboard name</label><input data-branding-name value="${esc(branding.name || 'Blackflame')}" maxlength="80"></div>
       <div class="field"><label>Dashboard description</label><input data-branding-description value="${esc(branding.description || 'Homelab dashboard')}" maxlength="200"></div>
-      <div class="field full"><label>Logo</label><div style="display:flex;gap:8px"><input id="branding-logo" data-branding-logo value="${esc(branding.logo || '')}" placeholder="Default logo"><button type="button" class="btn" data-action="icon-picker" data-target="branding-logo">Browse</button><button type="button" class="btn ghost" data-action="clear-branding-logo">Use default</button></div><div class="hint">Choose a dashboard-icons slug or upload a custom logo. Leave empty for the bundled Blackflame logo.</div></div>
+      <div class="field full"><label>Logo</label><div class="branding-logo-controls"><input id="branding-logo" data-branding-logo value="${esc(branding.logo || '')}" placeholder="Default logo"><button type="button" class="btn" data-action="icon-picker" data-target="branding-logo">Browse</button><button type="button" class="btn ghost" data-action="clear-branding-logo">Use default</button></div><div class="hint">Choose a dashboard-icons slug or upload a custom logo. Leave empty for the bundled Blackflame logo.</div></div>
     </div>
   `;
 }
@@ -920,23 +929,23 @@ function renderBrandingSettings(branding) {
 function renderLayoutSettings(layout) {
   return `
     <div class="form-grid">
-      <div class="field full"><label class="checkbox"><input type="checkbox" data-layout-hero ${layout.showHero ? 'checked' : ''}> Show the large board header</label><div class="hint">The top bar keeps the board switcher and compact clock/weather.</div></div>
+      <div class="field full"><label class="checkbox"><input type="checkbox" data-layout-hero ${layout.showHero ? 'checked' : ''}> Show board header</label><div class="hint">The top bar keeps the board switcher and compact clock/weather.</div></div>
       <div class="field"><label class="checkbox"><input type="checkbox" data-layout-search ${layout.showSearch !== false ? 'checked' : ''}> Show search bar</label></div>
       <div class="field"><label class="checkbox"><input type="checkbox" data-layout-clock ${layout.showClock !== false ? 'checked' : ''}> Show clock</label></div>
       <div class="field"><label class="checkbox"><input type="checkbox" data-layout-weather ${layout.showWeather !== false ? 'checked' : ''}> Show weather</label></div>
     </div>
-    <div class="hint" style="margin-top:12px">When the large header is hidden, the clock and weather move into the top bar.</div>
+    <div class="hint" style="margin-top:12px">When the board header is hidden, the clock and weather move into the top bar.</div>
   `;
 }
 
 function renderThemeSettings(theme) {
   const variables = { ...(PRESETS[theme.preset] || PRESETS.blackflame), ...(theme.variables || {}) };
-  const fields = ['bg', 'surface', 'surface2', 'text', 'muted', 'accent', 'accent2', 'border'];
+  const fields = { bg: 'Background', surface: 'Surface', surface2: 'Secondary surface', text: 'Text', muted: 'Muted text', accent: 'Accent', accent2: 'Secondary accent', border: 'Border' };
   return `
     <div class="form-grid">
       <div class="field"><label>Preset</label><select data-theme-preset>${Object.keys(PRESETS).map((name) => `<option value="${name}" ${theme.preset === name ? 'selected' : ''}>${name}</option>`).join('')}</select></div>
       <div class="field"><label>Radius</label><input data-theme-text="radius" value="${esc(variables.radius || '18px')}"></div>
-      ${fields.map((key) => `<div class="field"><label>${key}</label><div class="color-row"><input type="text" data-theme-text="${key}" value="${esc(variables[key] || '')}"><input type="color" data-theme-var="${key}" value="${esc(variables[key] || '#000000')}"></div></div>`).join('')}
+      ${Object.entries(fields).map(([key, label]) => `<div class="field"><label>${label}</label><div class="color-row"><input type="text" data-theme-text="${key}" value="${esc(variables[key] || '')}"><input type="color" data-theme-var="${key}" value="${esc(variables[key] || '#000000')}"></div></div>`).join('')}
       <div class="field full"><label>Custom CSS</label><textarea data-custom-css placeholder="/* Extra CSS served from /custom.css */">${esc(theme.customCss || '')}</textarea><div class="hint">Custom CSS is served as a separate stylesheet. Only administrators can edit it.</div></div>
     </div>
   `;
